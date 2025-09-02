@@ -56,7 +56,7 @@ function showSection(sectionName) {
             loadDashboard();
             break;
         case 'investments':
-            loadInvestments();
+            loadMonthlyInvestments();
             break;
         case 'loans':
             loadLoans();
@@ -254,7 +254,125 @@ function createCategoriesChart() {
 }
 
 // =======================
-// Investments Functions
+// Monthly Investments Functions (Excel Style)
+// =======================
+
+async function loadMonthlyInvestments() {
+    try {
+        const response = await axios.get('/api/monthly-investments');
+        if (response.data.success) {
+            displayMonthlyInvestments(response.data.data);
+        }
+    } catch (error) {
+        console.error('שגיאה בטעינת השקעות חודשיות:', error);
+        showNotification('שגיאה בטעינת השקעות חודשיות', 'error');
+    }
+}
+
+function displayMonthlyInvestments(monthlyData) {
+    const tbody = document.getElementById('monthly-investments-tbody');
+    const totalElement = document.getElementById('total-monthly-investments');
+    
+    if (!tbody || !totalElement) return;
+    
+    if (monthlyData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-gray-500 py-8">אין נתונים חודשיים עדיין</td></tr>';
+        totalElement.textContent = '₪0';
+        return;
+    }
+    
+    // חישוב סיכום
+    const totalInvestments = monthlyData.reduce((sum, item) => sum + item.amount, 0);
+    totalElement.textContent = formatCurrency(totalInvestments);
+    
+    tbody.innerHTML = monthlyData.map(item => `
+        <tr class="hover:bg-gray-50">
+            <td class="border border-gray-300 px-4 py-3 text-center font-medium">
+                ${item.month_name}
+            </td>
+            <td class="border border-gray-300 px-4 py-3 text-center">
+                <input 
+                    type="number" 
+                    value="${item.amount}" 
+                    onchange="updateMonthlyInvestment(${item.id}, this.value)"
+                    onblur="updateMonthlyInvestment(${item.id}, this.value)"
+                    class="w-full text-center border-0 bg-transparent focus:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1"
+                    step="0.01"
+                    min="0"
+                />
+            </td>
+            <td class="border border-gray-300 px-4 py-3 text-center font-bold text-green-600">
+                ${formatCurrency(item.cumulative)}
+            </td>
+            <td class="border border-gray-300 px-4 py-3 text-center">
+                <button onclick="deleteMonth(${item.id})" class="text-red-500 hover:text-red-700 text-sm px-2 py-1 rounded hover:bg-red-50">
+                    <i class="fas fa-trash mr-1"></i>מחק
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function updateMonthlyInvestment(id, amount) {
+    try {
+        const response = await axios.put(`/api/monthly-investments/${id}`, {
+            amount: parseFloat(amount) || 0
+        });
+        
+        if (response.data.success) {
+            // רענון הטבלה לעדכון הסכומים המצטברים
+            loadMonthlyInvestments();
+            // רענון Dashboard אם נמצאים בו
+            if (currentSection === 'dashboard') {
+                loadDashboard();
+            }
+        }
+    } catch (error) {
+        console.error('שגיאה בעדכון השקעה חודשית:', error);
+        showNotification('שגיאה בעדכון השקעה חודשית', 'error');
+        // טעינה מחדש לשחזור הערך הקודם
+        loadMonthlyInvestments();
+    }
+}
+
+async function deleteMonth(id) {
+    if (!confirm('האם אתה בטוח שברצונך למחוק חודש זה?')) return;
+    
+    try {
+        const response = await axios.delete(`/api/monthly-investments/${id}`);
+        if (response.data.success) {
+            showNotification('חודש נמחק בהצלחה');
+            loadMonthlyInvestments();
+            if (currentSection === 'dashboard') {
+                loadDashboard();
+            }
+        }
+    } catch (error) {
+        console.error('שגיאה במחיקת חודש:', error);
+        showNotification('שגיאה במחיקת חודש', 'error');
+    }
+}
+
+function addNewMonth() {
+    document.getElementById('add-month-modal').classList.remove('hidden');
+}
+
+function closeAddMonthModal() {
+    document.getElementById('add-month-modal').classList.add('hidden');
+}
+
+function toggleLegacyInvestments() {
+    const container = document.getElementById('investments-list');
+    if (container.classList.contains('hidden')) {
+        container.classList.remove('hidden');
+        loadInvestments(); // טעינת השקעות בודדות
+    } else {
+        container.classList.add('hidden');
+    }
+}
+
+// =======================
+// Legacy Investments Functions
 // =======================
 
 async function loadInvestments() {
@@ -807,9 +925,42 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // הגדרת תאריך היום כברירת מחדל
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('investment-date').value = today;
+    // הוספת חודש חדש
+    document.getElementById('add-month-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const formData = {
+            year: parseInt(document.getElementById('new-month-year').value),
+            month: parseInt(document.getElementById('new-month-month').value)
+        };
+        
+        try {
+            const response = await axios.post('/api/monthly-investments', formData);
+            if (response.data.success) {
+                showNotification('חודש חדש נוסף בהצלחה');
+                closeAddMonthModal();
+                document.getElementById('add-month-form').reset();
+                loadMonthlyInvestments();
+                if (currentSection === 'dashboard') {
+                    loadDashboard();
+                }
+            }
+        } catch (error) {
+            console.error('שגיאה בהוספת חודש חדש:', error);
+            if (error.response && error.response.data && error.response.data.error) {
+                showNotification(error.response.data.error, 'error');
+            } else {
+                showNotification('שגיאה בהוספת חודש חדש', 'error');
+            }
+        }
+    });
+
+    // הגדרת תאריך היום כברירת מחדל לטפסים הישנים
+    const investmentDateField = document.getElementById('investment-date');
+    if (investmentDateField) {
+        const today = new Date().toISOString().split('T')[0];
+        investmentDateField.value = today;
+    }
     
     // טעינה ראשונית של Dashboard
     loadDashboard();
