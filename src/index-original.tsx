@@ -2,67 +2,11 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serveStatic } from 'hono/cloudflare-workers'
 
-// נתונים זמניים בזיכרון (לבדיקה)
-let tempInvestments = [
-  { id: 1, amount: 5000, date: '2024-01-15', description: 'השקעה בקרן מדד תל אביב 35', category: 'קרנות נאמנות', created_at: new Date().toISOString() },
-  { id: 2, amount: 3000, date: '2024-02-15', description: 'השקעה במניית טבע', category: 'מניות', created_at: new Date().toISOString() },
-  { id: 3, amount: 4000, date: '2024-03-15', description: 'השקעה בביטקוין', category: 'קריפטו', created_at: new Date().toISOString() },
-  { id: 4, amount: 5500, date: '2024-04-15', description: 'השקעה בקרן נסדק', category: 'קרנות נאמנות', created_at: new Date().toISOString() }
-];
+type Bindings = {
+  DB: D1Database;
+}
 
-let tempLoans = [
-  { 
-    id: 1, 
-    principal_amount: 800000, 
-    current_balance: 720000, 
-    interest_rate: 4.5, 
-    monthly_payment: 4200, 
-    start_date: '2023-01-01', 
-    description: 'משכנתא לדירה ברמת גן', 
-    lender: 'בנק הפועלים', 
-    loan_type: 'משכנתא',
-    is_active: 1
-  },
-  { 
-    id: 2, 
-    principal_amount: 50000, 
-    current_balance: 35000, 
-    interest_rate: 8.2, 
-    monthly_payment: 1800, 
-    start_date: '2023-06-01', 
-    description: 'הלוואה לרכב', 
-    lender: 'בנק לאומי', 
-    loan_type: 'רכב',
-    is_active: 1
-  }
-];
-
-let tempGoals = [
-  {
-    id: 1,
-    goal_name: 'קרן חירום',
-    target_amount: 100000,
-    current_amount: 65000,
-    target_date: '2024-12-31',
-    goal_type: 'חיסכון',
-    description: 'קרן חירום של 6 חודשי הוצאות',
-    is_active: 1
-  },
-  {
-    id: 2,
-    goal_name: 'דירה חדשה',
-    target_amount: 400000,
-    current_amount: 120000,
-    target_date: '2026-06-01',
-    goal_type: 'השקעה',
-    description: 'מקדמה לדירה חדשה',
-    is_active: 1
-  }
-];
-
-let nextId = { investment: 5, loan: 3, goal: 3 };
-
-const app = new Hono()
+const app = new Hono<{ Bindings: Bindings }>()
 
 // Enable CORS for API routes
 app.use('/api/*', cors())
@@ -70,18 +14,26 @@ app.use('/api/*', cors())
 // Serve static files
 app.use('/static/*', serveStatic({ root: './public' }))
 
-// Serve favicon
-app.get('/favicon.ico', serveStatic({ path: './public/favicon.ico' }))
-
 // ========================
 // API Routes - השקעות (Investments)
 // ========================
 
+// קבלת כל ההשקעות
 app.get('/api/investments', async (c) => {
   try {
+    const { env } = c
+    
+    const result = await env.DB.prepare(`
+      SELECT 
+        id, amount, date, description, category, 
+        created_at, updated_at
+      FROM investments 
+      ORDER BY date DESC
+    `).all()
+    
     return c.json({ 
       success: true, 
-      data: tempInvestments.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      data: result.results || [] 
     })
   } catch (error) {
     return c.json({ 
@@ -91,8 +43,10 @@ app.get('/api/investments', async (c) => {
   }
 })
 
+// הוספת השקעה חדשה
 app.post('/api/investments', async (c) => {
   try {
+    const { env } = c
     const { amount, date, description, category } = await c.req.json()
     
     if (!amount || !date) {
@@ -102,20 +56,20 @@ app.post('/api/investments', async (c) => {
       }, 400)
     }
     
-    const newInvestment = {
-      id: nextId.investment++,
-      amount: parseFloat(amount),
-      date,
-      description: description || '',
-      category: category || 'כללי',
-      created_at: new Date().toISOString()
-    };
-    
-    tempInvestments.push(newInvestment);
+    const result = await env.DB.prepare(`
+      INSERT INTO investments (amount, date, description, category)
+      VALUES (?, ?, ?, ?)
+    `).bind(amount, date, description || '', category || 'כללי').run()
     
     return c.json({
       success: true,
-      data: newInvestment
+      data: { 
+        id: result.meta.last_row_id, 
+        amount, 
+        date, 
+        description, 
+        category 
+      }
     })
   } catch (error) {
     return c.json({
@@ -125,10 +79,16 @@ app.post('/api/investments', async (c) => {
   }
 })
 
+// מחיקת השקעה
 app.delete('/api/investments/:id', async (c) => {
   try {
-    const id = parseInt(c.req.param('id'));
-    tempInvestments = tempInvestments.filter(inv => inv.id !== id);
+    const { env } = c
+    const id = c.req.param('id')
+    
+    await env.DB.prepare(`
+      DELETE FROM investments WHERE id = ?
+    `).bind(id).run()
+    
     return c.json({ success: true })
   } catch (error) {
     return c.json({
@@ -139,14 +99,27 @@ app.delete('/api/investments/:id', async (c) => {
 })
 
 // ========================
-// API Routes - הלוואות (Loans)  
+// API Routes - הלוואות (Loans)
 // ========================
 
+// קבלת כל ההלוואות הפעילות
 app.get('/api/loans', async (c) => {
   try {
+    const { env } = c
+    
+    const result = await env.DB.prepare(`
+      SELECT 
+        id, principal_amount, current_balance, interest_rate,
+        monthly_payment, start_date, description, lender, loan_type,
+        is_active, created_at, updated_at
+      FROM loans 
+      WHERE is_active = 1
+      ORDER BY start_date DESC
+    `).all()
+    
     return c.json({ 
       success: true, 
-      data: tempLoans.filter(loan => loan.is_active)
+      data: result.results || [] 
     })
   } catch (error) {
     return c.json({ 
@@ -156,8 +129,10 @@ app.get('/api/loans', async (c) => {
   }
 })
 
+// הוספת הלוואה חדשה
 app.post('/api/loans', async (c) => {
   try {
+    const { env } = c
     const { 
       principal_amount, 
       current_balance, 
@@ -176,24 +151,36 @@ app.post('/api/loans', async (c) => {
       }, 400)
     }
     
-    const newLoan = {
-      id: nextId.loan++,
-      principal_amount: parseFloat(principal_amount),
-      current_balance: parseFloat(current_balance),
-      interest_rate: parseFloat(interest_rate) || 0,
-      monthly_payment: parseFloat(monthly_payment) || 0,
-      start_date,
-      description: description || '',
-      lender: lender || '',
-      loan_type: loan_type || 'כללי',
-      is_active: 1
-    };
-    
-    tempLoans.push(newLoan);
+    const result = await env.DB.prepare(`
+      INSERT INTO loans (
+        principal_amount, current_balance, interest_rate, 
+        monthly_payment, start_date, description, lender, loan_type
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      principal_amount, 
+      current_balance, 
+      interest_rate || 0, 
+      monthly_payment || 0, 
+      start_date, 
+      description || '', 
+      lender || '', 
+      loan_type || 'כללי'
+    ).run()
     
     return c.json({
       success: true,
-      data: newLoan
+      data: { 
+        id: result.meta.last_row_id, 
+        principal_amount,
+        current_balance,
+        interest_rate,
+        monthly_payment,
+        start_date,
+        description,
+        lender,
+        loan_type
+      }
     })
   } catch (error) {
     return c.json({
@@ -203,10 +190,18 @@ app.post('/api/loans', async (c) => {
   }
 })
 
+// הוספת תשלום הלוואה
 app.post('/api/loans/:id/payments', async (c) => {
   try {
-    const loanId = parseInt(c.req.param('id'));
-    const { payment_amount, principal_payment, payment_date, description } = await c.req.json()
+    const { env } = c
+    const loanId = c.req.param('id')
+    const { 
+      payment_amount, 
+      principal_payment, 
+      interest_payment, 
+      payment_date, 
+      description 
+    } = await c.req.json()
     
     if (!payment_amount || !payment_date) {
       return c.json({
@@ -215,18 +210,45 @@ app.post('/api/loans/:id/payments', async (c) => {
       }, 400)
     }
     
-    // מציאת ההלוואה ועדכון היתרה
-    const loan = tempLoans.find(l => l.id === loanId);
-    if (loan) {
-      const principalPmt = principal_payment || payment_amount;
-      loan.current_balance = Math.max(0, loan.current_balance - principalPmt);
-    }
+    // עדכון יתרת ההלוואה
+    const principalPmt = principal_payment || payment_amount
+    
+    await env.DB.prepare(`
+      UPDATE loans 
+      SET current_balance = current_balance - ?, 
+          updated_at = CURRENT_TIMESTAMP 
+      WHERE id = ?
+    `).bind(principalPmt, loanId).run()
+    
+    // קבלת היתרה החדשה
+    const loanResult = await env.DB.prepare(`
+      SELECT current_balance FROM loans WHERE id = ?
+    `).bind(loanId).first()
+    
+    const remaining_balance = loanResult ? loanResult.current_balance : 0
+    
+    // הוספת התשלום לטבלה
+    const result = await env.DB.prepare(`
+      INSERT INTO loan_payments (
+        loan_id, payment_amount, principal_payment, 
+        interest_payment, payment_date, remaining_balance, description
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      loanId, 
+      payment_amount, 
+      principal_payment || payment_amount, 
+      interest_payment || 0, 
+      payment_date, 
+      remaining_balance,
+      description || ''
+    ).run()
     
     return c.json({
       success: true,
       data: { 
-        id: Date.now(), // ID זמני
-        remaining_balance: loan ? loan.current_balance : 0
+        id: result.meta.last_row_id,
+        remaining_balance
       }
     })
   } catch (error) {
@@ -241,11 +263,24 @@ app.post('/api/loans/:id/payments', async (c) => {
 // API Routes - יעדים כלכליים (Financial Goals)
 // ========================
 
+// קבלת כל היעדים הפעילים
 app.get('/api/goals', async (c) => {
   try {
+    const { env } = c
+    
+    const result = await env.DB.prepare(`
+      SELECT 
+        id, goal_name, target_amount, current_amount, 
+        target_date, goal_type, description, is_active,
+        created_at, updated_at
+      FROM financial_goals 
+      WHERE is_active = 1
+      ORDER BY target_date ASC
+    `).all()
+    
     return c.json({ 
       success: true, 
-      data: tempGoals.filter(goal => goal.is_active)
+      data: result.results || [] 
     })
   } catch (error) {
     return c.json({ 
@@ -255,8 +290,10 @@ app.get('/api/goals', async (c) => {
   }
 })
 
+// הוספת יעד חדש
 app.post('/api/goals', async (c) => {
   try {
+    const { env } = c
     const { 
       goal_name, 
       target_amount, 
@@ -273,22 +310,32 @@ app.post('/api/goals', async (c) => {
       }, 400)
     }
     
-    const newGoal = {
-      id: nextId.goal++,
-      goal_name,
-      target_amount: parseFloat(target_amount),
-      current_amount: parseFloat(current_amount) || 0,
-      target_date: target_date || null,
-      goal_type: goal_type || 'חיסכון',
-      description: description || '',
-      is_active: 1
-    };
-    
-    tempGoals.push(newGoal);
+    const result = await env.DB.prepare(`
+      INSERT INTO financial_goals (
+        goal_name, target_amount, current_amount, 
+        target_date, goal_type, description
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).bind(
+      goal_name, 
+      target_amount, 
+      current_amount || 0, 
+      target_date || null, 
+      goal_type || 'חיסכון', 
+      description || ''
+    ).run()
     
     return c.json({
       success: true,
-      data: newGoal
+      data: { 
+        id: result.meta.last_row_id, 
+        goal_name,
+        target_amount,
+        current_amount,
+        target_date,
+        goal_type,
+        description
+      }
     })
   } catch (error) {
     return c.json({
@@ -298,15 +345,18 @@ app.post('/api/goals', async (c) => {
   }
 })
 
+// עדכון יעד (הוספת כסף ליעד)
 app.put('/api/goals/:id', async (c) => {
   try {
-    const goalId = parseInt(c.req.param('id'));
+    const { env } = c
+    const goalId = c.req.param('id')
     const { current_amount } = await c.req.json()
     
-    const goal = tempGoals.find(g => g.id === goalId);
-    if (goal) {
-      goal.current_amount = parseFloat(current_amount);
-    }
+    await env.DB.prepare(`
+      UPDATE financial_goals 
+      SET current_amount = ?, updated_at = CURRENT_TIMESTAMP 
+      WHERE id = ?
+    `).bind(current_amount, goalId).run()
     
     return c.json({ success: true })
   } catch (error) {
@@ -323,49 +373,60 @@ app.put('/api/goals/:id', async (c) => {
 
 app.get('/api/dashboard', async (c) => {
   try {
-    // חישוב סך כל ההשקעות
-    const totalInvestments = tempInvestments.reduce((sum, inv) => sum + inv.amount, 0);
+    const { env } = c
     
-    // חישוב סך כל החובות
-    const totalDebts = tempLoans
-      .filter(loan => loan.is_active)
-      .reduce((sum, loan) => sum + loan.current_balance, 0);
+    // סך כל ההשקעות
+    const investmentsTotal = await env.DB.prepare(`
+      SELECT COALESCE(SUM(amount), 0) as total 
+      FROM investments
+    `).first()
     
-    // חישוב התקדמות יעדים
-    const activeGoals = tempGoals.filter(goal => goal.is_active);
-    const totalSaved = activeGoals.reduce((sum, goal) => sum + goal.current_amount, 0);
-    const totalTarget = activeGoals.reduce((sum, goal) => sum + goal.target_amount, 0);
-    const completionRate = totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0;
+    // סך כל החובות
+    const loansTotal = await env.DB.prepare(`
+      SELECT COALESCE(SUM(current_balance), 0) as total 
+      FROM loans 
+      WHERE is_active = 1
+    `).first()
     
-    // חישוב השקעות לפי חודש (נתונים לדוגמה)
-    const monthlyInvestments = [
-      { month: '2024-01', total: 5000 },
-      { month: '2024-02', total: 8000 },
-      { month: '2024-03', total: 12000 },
-      { month: '2024-04', total: 17500 },
-      { month: '2024-05', total: 17500 },
-      { month: '2024-06', total: 17500 },
-      { month: '2024-07', total: 17500 },
-      { month: '2024-08', total: 17500 }
-    ];
+    // התקדמות יעדים
+    const goalsProgress = await env.DB.prepare(`
+      SELECT 
+        COUNT(*) as total_goals,
+        COALESCE(SUM(current_amount), 0) as total_saved,
+        COALESCE(SUM(target_amount), 0) as total_target
+      FROM financial_goals 
+      WHERE is_active = 1
+    `).first()
+    
+    // השקעות לפי חודש (12 חודשים אחרונים)
+    const monthlyInvestments = await env.DB.prepare(`
+      SELECT 
+        strftime('%Y-%m', date) as month,
+        SUM(amount) as total
+      FROM investments 
+      WHERE date >= date('now', '-12 months')
+      GROUP BY strftime('%Y-%m', date)
+      ORDER BY month ASC
+    `).all()
     
     return c.json({
       success: true,
       data: {
-        totalInvestments,
-        totalDebts,
-        netWorth: totalInvestments - totalDebts,
+        totalInvestments: investmentsTotal?.total || 0,
+        totalDebts: loansTotal?.total || 0,
+        netWorth: (investmentsTotal?.total || 0) - (loansTotal?.total || 0),
         goals: {
-          totalGoals: activeGoals.length,
-          totalSaved,
-          totalTarget,
-          completionRate
+          totalGoals: goalsProgress?.total_goals || 0,
+          totalSaved: goalsProgress?.total_saved || 0,
+          totalTarget: goalsProgress?.total_target || 0,
+          completionRate: goalsProgress?.total_target > 0 
+            ? Math.round(((goalsProgress?.total_saved || 0) / goalsProgress.total_target) * 100) 
+            : 0
         },
-        monthlyInvestments
+        monthlyInvestments: monthlyInvestments.results || []
       }
     })
   } catch (error) {
-    console.error('Dashboard error:', error);
     return c.json({
       success: false,
       error: 'שגיאה בטעינת נתוני Dashboard'
@@ -385,7 +446,6 @@ app.get('/', (c) => {
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <link href="/static/styles.css" rel="stylesheet">
         <style>
             body { font-family: 'Arial', sans-serif; }
             .rtl { direction: rtl; text-align: right; }
@@ -400,10 +460,6 @@ app.get('/', (c) => {
                         <i class="fas fa-chart-line mr-3"></i>
                         מעקב השקעות והלוואות
                     </h1>
-                    <p class="text-blue-200 text-sm mt-2">
-                        <i class="fas fa-info-circle mr-1"></i>
-                        גרסת הדגמה - הנתונים נשמרים זמנית בזיכרון
-                    </p>
                 </div>
             </header>
 
