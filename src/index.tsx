@@ -337,16 +337,17 @@ app.get('/api/dashboard', async (c) => {
     const totalTarget = activeGoals.reduce((sum, goal) => sum + goal.target_amount, 0);
     const completionRate = totalTarget > 0 ? Math.round((totalSaved / totalTarget) * 100) : 0;
     
-    // חישוב השקעות לפי חודש (נתונים לדוגמה)
+    // חישוב השקעות מצטברות לפי חודש (נתונים לדוגמה)
     const monthlyInvestments = [
       { month: '2024-01', total: 5000 },
       { month: '2024-02', total: 8000 },
       { month: '2024-03', total: 12000 },
       { month: '2024-04', total: 17500 },
-      { month: '2024-05', total: 17500 },
-      { month: '2024-06', total: 17500 },
-      { month: '2024-07', total: 17500 },
-      { month: '2024-08', total: 17500 }
+      { month: '2024-05', total: 20300 },
+      { month: '2024-06', total: 24800 },
+      { month: '2024-07', total: 28200 },
+      { month: '2024-08', total: 32600 },
+      { month: '2024-09', total: 35400 }
     ];
     
     return c.json({
@@ -467,12 +468,26 @@ app.get('/', (c) => {
                         </div>
                     </div>
 
-                    <div class="bg-white rounded-lg shadow-md p-6">
-                        <h3 class="text-xl font-semibold text-gray-800 mb-4">
-                            <i class="fas fa-chart-area text-blue-500 ml-2"></i>
-                            מגמת השקעות חודשית
-                        </h3>
-                        <canvas id="investmentsChart" width="400" height="200"></canvas>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="bg-white rounded-lg shadow-md p-6">
+                            <h3 class="text-xl font-semibold text-gray-800 mb-4">
+                                <i class="fas fa-chart-line text-blue-500 ml-2"></i>
+                                מגמת השקעות מצטברת
+                            </h3>
+                            <div style="position: relative; height: 300px; width: 100%;">
+                                <canvas id="investmentsChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-white rounded-lg shadow-md p-6">
+                            <h3 class="text-xl font-semibold text-gray-800 mb-4">
+                                <i class="fas fa-chart-pie text-green-500 ml-2"></i>
+                                השקעות לפי קטגוריה
+                            </h3>
+                            <div style="position: relative; height: 300px; width: 100%;">
+                                <canvas id="categoriesChart"></canvas>
+                            </div>
+                        </div>
                     </div>
                 </div>
 

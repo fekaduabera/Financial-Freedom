@@ -2,6 +2,7 @@
 
 // משתנים גלובליים
 let investmentsChart = null;
+let categoriesChart = null;
 let currentSection = 'dashboard';
 
 // פונקציות עזר
@@ -82,8 +83,9 @@ async function loadDashboard() {
             document.getElementById('net-worth').textContent = formatCurrency(data.netWorth);
             document.getElementById('goals-completion').textContent = data.goals.completionRate + '%';
             
-            // יצירת גרף השקעות חודשי
+            // יצירת גרפים
             createInvestmentsChart(data.monthlyInvestments);
+            createCategoriesChart();
         }
     } catch (error) {
         console.error('שגיאה בטעינת Dashboard:', error);
@@ -92,7 +94,8 @@ async function loadDashboard() {
 }
 
 function createInvestmentsChart(monthlyData) {
-    const ctx = document.getElementById('investmentsChart').getContext('2d');
+    const ctx = document.getElementById('investmentsChart');
+    if (!ctx) return;
     
     // מחיקת גרף קיים
     if (investmentsChart) {
@@ -115,28 +118,133 @@ function createInvestmentsChart(monthlyData) {
         data: {
             labels: labels,
             datasets: [{
-                label: 'השקעות חודשיות',
+                label: 'השקעות חודשיות (₪)',
                 data: amounts,
-                borderColor: 'rgb(59, 130, 246)',
+                borderColor: '#3b82f6',
                 backgroundColor: 'rgba(59, 130, 246, 0.1)',
                 fill: true,
-                tension: 0.1
+                tension: 0.4,
+                borderWidth: 3,
+                pointBackgroundColor: '#3b82f6',
+                pointBorderColor: '#ffffff',
+                pointBorderWidth: 2,
+                pointRadius: 6,
+                pointHoverRadius: 8
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            interaction: {
+                intersect: false,
+                mode: 'index',
+            },
             plugins: {
                 legend: {
-                    display: false
+                    display: true,
+                    position: 'top',
+                    labels: {
+                        usePointStyle: true,
+                        font: {
+                            size: 14
+                        }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    titleColor: '#ffffff',
+                    bodyColor: '#ffffff',
+                    callbacks: {
+                        label: function(context) {
+                            return 'השקעות: ' + formatCurrency(context.parsed.y);
+                        }
+                    }
                 }
             },
             scales: {
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        font: {
+                            size: 12
+                        }
+                    }
+                },
                 y: {
                     beginAtZero: true,
+                    grid: {
+                        color: 'rgba(0, 0, 0, 0.1)'
+                    },
                     ticks: {
                         callback: function(value) {
                             return formatCurrency(value);
+                        },
+                        font: {
+                            size: 12
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+function createCategoriesChart() {
+    const ctx = document.getElementById('categoriesChart');
+    if (!ctx) return;
+    
+    // מחיקת גרף קיים
+    if (categoriesChart) {
+        categoriesChart.destroy();
+    }
+    
+    // נתוני קטגוריות לדוגמה
+    const categoryData = {
+        labels: ['קרנות נאמנות', 'מניות', 'קריפטו', 'אגחות', 'נדל"ן'],
+        datasets: [{
+            data: [10500, 8000, 4000, 3000, 2000],
+            backgroundColor: [
+                '#3b82f6', // כחול
+                '#10b981', // ירוק
+                '#f59e0b', // כתום
+                '#ef4444', // אדום
+                '#8b5cf6'  // סגול
+            ],
+            borderColor: '#ffffff',
+            borderWidth: 3
+        }]
+    };
+    
+    categoriesChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: categoryData,
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        font: {
+                            size: 12
+                        },
+                        padding: 15
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    titleColor: '#ffffff',
+                    bodyColor: '#ffffff',
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = formatCurrency(context.parsed);
+                            const total = context.dataset.data.reduce((sum, val) => sum + val, 0);
+                            const percentage = Math.round((context.parsed / total) * 100);
+                            return label + ': ' + value + ' (' + percentage + '%)';
                         }
                     }
                 }
