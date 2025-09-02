@@ -4,10 +4,62 @@ import { serveStatic } from 'hono/cloudflare-workers'
 
 // נתונים זמניים בזיכרון (לבדיקה)
 let tempInvestments = [
-  { id: 1, amount: 5000, date: '2024-01-15', description: 'השקעה בקרן מדד תל אביב 35', category: 'קרנות נאמנות', created_at: new Date().toISOString() },
-  { id: 2, amount: 3000, date: '2024-02-15', description: 'השקעה במניית טבע', category: 'מניות', created_at: new Date().toISOString() },
-  { id: 3, amount: 4000, date: '2024-03-15', description: 'השקעה בביטקוין', category: 'קריפטו', created_at: new Date().toISOString() },
-  { id: 4, amount: 5500, date: '2024-04-15', description: 'השקעה בקרן נסדק', category: 'קרנות נאמנות', created_at: new Date().toISOString() }
+  { 
+    id: 1, 
+    amount: 5000, 
+    date: '2024-01-15', 
+    description: 'השקעה בקרן מדד תל אביב 35', 
+    category: 'קרנות נאמנות', 
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    version: 1
+  },
+  { 
+    id: 2, 
+    amount: 3000, 
+    date: '2024-02-15', 
+    description: 'השקעה במניית טבע', 
+    category: 'מניות', 
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    version: 1
+  },
+  { 
+    id: 3, 
+    amount: 4000, 
+    date: '2024-03-15', 
+    description: 'השקעה בביטקוין', 
+    category: 'קריפטו', 
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    version: 1
+  },
+  { 
+    id: 4, 
+    amount: 5500, 
+    date: '2024-04-15', 
+    description: 'השקעה בקרן נסדק', 
+    category: 'קרנות נאמנות', 
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    version: 1
+  }
+];
+
+// טבלת היסטוריה להשקעות
+let tempInvestmentHistory = [
+  {
+    id: 1,
+    investment_id: 1,
+    amount: 5000,
+    date: '2024-01-15',
+    description: 'השקעה בקרן מדד תל אביב 35',
+    category: 'קרנות נאמנות',
+    version: 1,
+    change_type: 'created',
+    change_description: 'השקעה נוצרה',
+    changed_at: new Date().toISOString()
+  }
 ];
 
 let tempLoans = [
@@ -108,10 +160,28 @@ app.post('/api/investments', async (c) => {
       date,
       description: description || '',
       category: category || 'כללי',
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      version: 1
     };
     
     tempInvestments.push(newInvestment);
+    
+    // הוספה להיסטוריה
+    const historyEntry = {
+      id: tempInvestmentHistory.length + 1,
+      investment_id: newInvestment.id,
+      amount: newInvestment.amount,
+      date: newInvestment.date,
+      description: newInvestment.description,
+      category: newInvestment.category,
+      version: 1,
+      change_type: 'created',
+      change_description: 'השקעה נוצרה',
+      changed_at: new Date().toISOString()
+    };
+    
+    tempInvestmentHistory.push(historyEntry);
     
     return c.json({
       success: true,
@@ -125,15 +195,175 @@ app.post('/api/investments', async (c) => {
   }
 })
 
+// עדכון השקעה עם שמירת היסטוריה
+app.put('/api/investments/:id', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'));
+    const { amount, date, description, category, change_description } = await c.req.json()
+    
+    const investment = tempInvestments.find(inv => inv.id === id);
+    if (!investment) {
+      return c.json({
+        success: false,
+        error: 'השקעה לא נמצאה'
+      }, 404)
+    }
+    
+    // שמירת הגרסה הקודמת בהיסטוריה
+    const historyEntry = {
+      id: tempInvestmentHistory.length + 1,
+      investment_id: id,
+      amount: investment.amount,
+      date: investment.date,
+      description: investment.description,
+      category: investment.category,
+      version: investment.version,
+      change_type: 'updated',
+      change_description: change_description || 'עודכנה השקעה',
+      changed_at: new Date().toISOString()
+    };
+    
+    tempInvestmentHistory.push(historyEntry);
+    
+    // עדכון ההשקעה
+    investment.amount = parseFloat(amount) || investment.amount;
+    investment.date = date || investment.date;
+    investment.description = description || investment.description;
+    investment.category = category || investment.category;
+    investment.updated_at = new Date().toISOString();
+    investment.version += 1;
+    
+    return c.json({
+      success: true,
+      data: investment
+    })
+  } catch (error) {
+    return c.json({
+      success: false,
+      error: 'שגיאה בעדכון השקעה'
+    }, 500)
+  }
+})
+
 app.delete('/api/investments/:id', async (c) => {
   try {
     const id = parseInt(c.req.param('id'));
+    const investment = tempInvestments.find(inv => inv.id === id);
+    
+    if (investment) {
+      // שמירה בהיסטוריה לפני מחיקה
+      const historyEntry = {
+        id: tempInvestmentHistory.length + 1,
+        investment_id: id,
+        amount: investment.amount,
+        date: investment.date,
+        description: investment.description,
+        category: investment.category,
+        version: investment.version,
+        change_type: 'deleted',
+        change_description: 'השקעה נמחקה',
+        changed_at: new Date().toISOString()
+      };
+      
+      tempInvestmentHistory.push(historyEntry);
+    }
+    
     tempInvestments = tempInvestments.filter(inv => inv.id !== id);
     return c.json({ success: true })
   } catch (error) {
     return c.json({
       success: false,
       error: 'שגיאה במחיקת השקעה'
+    }, 500)
+  }
+})
+
+// קבלת היסטוריה של השקעה
+app.get('/api/investments/:id/history', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'));
+    const history = tempInvestmentHistory
+      .filter(h => h.investment_id === id)
+      .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime());
+    
+    return c.json({ 
+      success: true, 
+      data: history 
+    })
+  } catch (error) {
+    return c.json({ 
+      success: false, 
+      error: 'שגיאה בטעינת היסטוריה' 
+    }, 500)
+  }
+})
+
+// שחזור השקעה לגרסה קודמת
+app.post('/api/investments/:id/restore/:version', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'));
+    const version = parseInt(c.req.param('version'));
+    
+    const investment = tempInvestments.find(inv => inv.id === id);
+    const historyEntry = tempInvestmentHistory.find(h => 
+      h.investment_id === id && h.version === version
+    );
+    
+    if (!investment || !historyEntry) {
+      return c.json({
+        success: false,
+        error: 'השקעה או גרסה לא נמצאו'
+      }, 404)
+    }
+    
+    // שמירת הגרסה הנוכחית בהיסטוריה לפני השחזור
+    const currentHistoryEntry = {
+      id: tempInvestmentHistory.length + 1,
+      investment_id: id,
+      amount: investment.amount,
+      date: investment.date,
+      description: investment.description,
+      category: investment.category,
+      version: investment.version,
+      change_type: 'backup_before_restore',
+      change_description: `גיבוי לפני שחזור לגרסה ${version}`,
+      changed_at: new Date().toISOString()
+    };
+    
+    tempInvestmentHistory.push(currentHistoryEntry);
+    
+    // שחזור לגרסה קודמת
+    investment.amount = historyEntry.amount;
+    investment.date = historyEntry.date;
+    investment.description = historyEntry.description;
+    investment.category = historyEntry.category;
+    investment.updated_at = new Date().toISOString();
+    investment.version += 1;
+    
+    // רישום השחזור בהיסטוריה
+    const restoreHistoryEntry = {
+      id: tempInvestmentHistory.length + 1,
+      investment_id: id,
+      amount: investment.amount,
+      date: investment.date,
+      description: investment.description,
+      category: investment.category,
+      version: investment.version,
+      change_type: 'restored',
+      change_description: `שוחזר מגרסה ${version}`,
+      changed_at: new Date().toISOString()
+    };
+    
+    tempInvestmentHistory.push(restoreHistoryEntry);
+    
+    return c.json({
+      success: true,
+      data: investment
+    })
+  } catch (error) {
+    return c.json({
+      success: false,
+      error: 'שגיאה בשחזור השקעה'
     }, 500)
   }
 })
@@ -524,6 +754,99 @@ app.get('/', (c) => {
                         </h3>
                         <div id="investments-list" class="space-y-4">
                             <!-- השקעות יטענו כאן דינמית -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Edit Investment Modal -->
+                <div id="edit-investment-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+                    <div class="flex items-center justify-center min-h-screen p-4">
+                        <div class="bg-white rounded-lg shadow-lg max-w-md w-full">
+                            <div class="px-6 py-4 border-b border-gray-200">
+                                <h3 class="text-lg font-medium text-gray-900">
+                                    <i class="fas fa-edit text-blue-500 ml-2"></i>
+                                    עריכת השקעה
+                                </h3>
+                                <button onclick="closeEditModal()" class="absolute top-4 left-4 text-gray-400 hover:text-gray-600">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            
+                            <form id="edit-investment-form" class="p-6 space-y-4">
+                                <input type="hidden" id="edit-investment-id">
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">סכום השקעה</label>
+                                    <input type="number" id="edit-investment-amount" class="w-full border rounded-lg px-3 py-2" required>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">תאריך</label>
+                                    <input type="date" id="edit-investment-date" class="w-full border rounded-lg px-3 py-2" required>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">תיאור השקעה</label>
+                                    <input type="text" id="edit-investment-description" class="w-full border rounded-lg px-3 py-2">
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">קטגוריה</label>
+                                    <select id="edit-investment-category" class="w-full border rounded-lg px-3 py-2">
+                                        <option value="מניות">מניות</option>
+                                        <option value="קרנות נאמנות">קרנות נאמנות</option>
+                                        <option value="אגחות">אגחות</option>
+                                        <option value="קריפטו">קריפטו</option>
+                                        <option value="נדלן">נדלן</option>
+                                        <option value="כללי">כללי</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">סיבת השינוי</label>
+                                    <input type="text" id="edit-change-description" placeholder="למשל: תיקון סכום, עדכון תיאור" class="w-full border rounded-lg px-3 py-2">
+                                </div>
+                                
+                                <div class="flex justify-between pt-4">
+                                    <button type="button" onclick="showInvestmentHistory()" class="bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600">
+                                        <i class="fas fa-history ml-1"></i>
+                                        היסטוריה
+                                    </button>
+                                    
+                                    <div class="space-x-2 space-x-reverse">
+                                        <button type="button" onclick="closeEditModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400">
+                                            ביטול
+                                        </button>
+                                        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
+                                            <i class="fas fa-save ml-1"></i>
+                                            שמור שינויים
+                                        </button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Investment History Modal -->
+                <div id="investment-history-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50">
+                    <div class="flex items-center justify-center min-h-screen p-4">
+                        <div class="bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-[80vh] overflow-hidden">
+                            <div class="px-6 py-4 border-b border-gray-200">
+                                <h3 class="text-lg font-medium text-gray-900">
+                                    <i class="fas fa-history text-green-500 ml-2"></i>
+                                    היסטוריית השינויים
+                                </h3>
+                                <button onclick="closeHistoryModal()" class="absolute top-4 left-4 text-gray-400 hover:text-gray-600">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            
+                            <div class="p-6 overflow-y-auto max-h-[60vh]">
+                                <div id="investment-history-content">
+                                    <!-- היסטוריה תיטען כאן דינמית -->
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

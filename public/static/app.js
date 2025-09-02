@@ -278,18 +278,35 @@ function displayInvestments(investments) {
     }
     
     container.innerHTML = investments.map(investment => `
-        <div class="border rounded-lg p-4 flex justify-between items-center">
-            <div>
-                <h4 class="font-semibold text-gray-800">${investment.description || 'השקעה'}</h4>
-                <p class="text-sm text-gray-600">
-                    ${formatDate(investment.date)} | ${investment.category}
-                </p>
-            </div>
-            <div class="text-left">
-                <p class="text-xl font-bold text-green-600">${formatCurrency(investment.amount)}</p>
-                <button onclick="deleteInvestment(${investment.id})" class="text-red-500 hover:text-red-700 text-sm">
-                    <i class="fas fa-trash mr-1"></i>מחק
-                </button>
+        <div class="border rounded-lg p-4 hover:border-blue-300 transition-colors">
+            <div class="flex justify-between items-start">
+                <div class="flex-1">
+                    <div class="flex items-center gap-2 mb-2">
+                        <h4 class="font-semibold text-gray-800">${investment.description || 'השקעה'}</h4>
+                        ${investment.version > 1 ? `<span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full">v${investment.version}</span>` : ''}
+                    </div>
+                    <p class="text-sm text-gray-600 mb-1">
+                        ${formatDate(investment.date)} | ${investment.category}
+                    </p>
+                    <p class="text-xs text-gray-500">
+                        נוצר: ${formatDate(investment.created_at)} 
+                        ${investment.updated_at !== investment.created_at ? `| עודכן: ${formatDate(investment.updated_at)}` : ''}
+                    </p>
+                </div>
+                <div class="text-left">
+                    <p class="text-xl font-bold text-green-600 mb-2">${formatCurrency(investment.amount)}</p>
+                    <div class="flex gap-2">
+                        <button onclick="editInvestment(${investment.id})" class="text-blue-500 hover:text-blue-700 text-sm">
+                            <i class="fas fa-edit mr-1"></i>ערוך
+                        </button>
+                        <button onclick="showInvestmentHistoryById(${investment.id})" class="text-green-500 hover:text-green-700 text-sm">
+                            <i class="fas fa-history mr-1"></i>היסטוריה
+                        </button>
+                        <button onclick="deleteInvestment(${investment.id})" class="text-red-500 hover:text-red-700 text-sm">
+                            <i class="fas fa-trash mr-1"></i>מחק
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     `).join('');
@@ -311,6 +328,165 @@ async function deleteInvestment(id) {
     } catch (error) {
         console.error('שגיאה במחיקת השקעה:', error);
         showNotification('שגיאה במחיקת השקעה', 'error');
+    }
+}
+
+// פונקציות עריכת השקעות
+async function editInvestment(id) {
+    try {
+        // טעינת נתוני ההשקעה הנוכחיים
+        const response = await axios.get('/api/investments');
+        if (response.data.success) {
+            const investment = response.data.data.find(inv => inv.id === id);
+            if (investment) {
+                // מילוי הטופס
+                document.getElementById('edit-investment-id').value = investment.id;
+                document.getElementById('edit-investment-amount').value = investment.amount;
+                document.getElementById('edit-investment-date').value = investment.date;
+                document.getElementById('edit-investment-description').value = investment.description;
+                document.getElementById('edit-investment-category').value = investment.category;
+                document.getElementById('edit-change-description').value = '';
+                
+                // פתיחת המודל
+                document.getElementById('edit-investment-modal').classList.remove('hidden');
+            }
+        }
+    } catch (error) {
+        console.error('שגיאה בטעינת נתוני השקעה:', error);
+        showNotification('שגיאה בטעינת נתוני השקעה', 'error');
+    }
+}
+
+function closeEditModal() {
+    document.getElementById('edit-investment-modal').classList.add('hidden');
+}
+
+async function showInvestmentHistoryById(id) {
+    document.getElementById('edit-investment-id').value = id;
+    await showInvestmentHistory();
+}
+
+async function showInvestmentHistory() {
+    const investmentId = document.getElementById('edit-investment-id').value;
+    if (!investmentId) {
+        showNotification('לא נבחרה השקעה', 'error');
+        return;
+    }
+    
+    try {
+        const response = await axios.get(`/api/investments/${investmentId}/history`);
+        if (response.data.success) {
+            displayInvestmentHistory(response.data.data);
+            document.getElementById('investment-history-modal').classList.remove('hidden');
+        }
+    } catch (error) {
+        console.error('שגיאה בטעינת היסטוריה:', error);
+        showNotification('שגיאה בטעינת היסטוריה', 'error');
+    }
+}
+
+function closeHistoryModal() {
+    document.getElementById('investment-history-modal').classList.add('hidden');
+}
+
+function displayInvestmentHistory(history) {
+    const container = document.getElementById('investment-history-content');
+    
+    if (history.length === 0) {
+        container.innerHTML = '<p class="text-gray-500 text-center py-8">אין היסטוריה עדיין</p>';
+        return;
+    }
+    
+    const getChangeTypeIcon = (type) => {
+        switch(type) {
+            case 'created': return '<i class="fas fa-plus text-green-500"></i>';
+            case 'updated': return '<i class="fas fa-edit text-blue-500"></i>';
+            case 'deleted': return '<i class="fas fa-trash text-red-500"></i>';
+            case 'restored': return '<i class="fas fa-undo text-purple-500"></i>';
+            case 'backup_before_restore': return '<i class="fas fa-archive text-gray-500"></i>';
+            default: return '<i class="fas fa-circle text-gray-400"></i>';
+        }
+    };
+    
+    const getChangeTypeText = (type) => {
+        switch(type) {
+            case 'created': return 'נוצרה';
+            case 'updated': return 'עודכנה';
+            case 'deleted': return 'נמחקה';
+            case 'restored': return 'שוחזרה';
+            case 'backup_before_restore': return 'גיבוי';
+            default: return 'שונה';
+        }
+    };
+    
+    container.innerHTML = `
+        <div class="space-y-4">
+            ${history.map(entry => `
+                <div class="border-r-4 border-blue-200 bg-gray-50 p-4 rounded">
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="flex items-center gap-2">
+                            ${getChangeTypeIcon(entry.change_type)}
+                            <span class="font-semibold text-gray-800">${getChangeTypeText(entry.change_type)}</span>
+                            <span class="bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded">v${entry.version}</span>
+                        </div>
+                        <div class="text-left">
+                            <p class="text-xs text-gray-500">${formatDate(entry.changed_at)}</p>
+                            ${entry.change_type !== 'deleted' && entry.change_type !== 'backup_before_restore' ? `
+                                <button onclick="restoreInvestmentVersion(${entry.investment_id}, ${entry.version})" 
+                                        class="text-xs text-blue-500 hover:text-blue-700 mt-1">
+                                    <i class="fas fa-undo mr-1"></i>שחזר לגרסה זו
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <span class="text-gray-600">סכום:</span>
+                            <span class="font-medium">${formatCurrency(entry.amount)}</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600">תאריך:</span>
+                            <span class="font-medium">${formatDate(entry.date)}</span>
+                        </div>
+                        <div class="col-span-2">
+                            <span class="text-gray-600">תיאור:</span>
+                            <span class="font-medium">${entry.description}</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-600">קטגוריה:</span>
+                            <span class="font-medium">${entry.category}</span>
+                        </div>
+                    </div>
+                    
+                    ${entry.change_description ? `
+                        <div class="mt-2 text-sm text-gray-600 italic">
+                            "${entry.change_description}"
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+async function restoreInvestmentVersion(investmentId, version) {
+    if (!confirm(`האם אתה בטוח שברצונך לשחזר לגרסה ${version}?`)) return;
+    
+    try {
+        const response = await axios.post(`/api/investments/${investmentId}/restore/${version}`);
+        if (response.data.success) {
+            showNotification('השקעה שוחזרה בהצלחה לגרסה קודמת');
+            closeHistoryModal();
+            closeEditModal();
+            loadInvestments();
+            if (currentSection === 'dashboard') {
+                loadDashboard();
+            }
+        }
+    } catch (error) {
+        console.error('שגיאה בשחזור השקעה:', error);
+        showNotification('שגיאה בשחזור השקעה', 'error');
     }
 }
 
@@ -568,6 +744,36 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('שגיאה בהוספת הלוואה:', error);
             showNotification('שגיאה בהוספת הלוואה', 'error');
+        }
+    });
+
+    // עריכת השקעה
+    document.getElementById('edit-investment-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const investmentId = document.getElementById('edit-investment-id').value;
+        const formData = {
+            amount: parseFloat(document.getElementById('edit-investment-amount').value),
+            date: document.getElementById('edit-investment-date').value,
+            description: document.getElementById('edit-investment-description').value,
+            category: document.getElementById('edit-investment-category').value,
+            change_description: document.getElementById('edit-change-description').value
+        };
+        
+        try {
+            const response = await axios.put(`/api/investments/${investmentId}`, formData);
+            if (response.data.success) {
+                showNotification('השקעה עודכנה בהצלחה');
+                closeEditModal();
+                loadInvestments();
+                // רענון Dashboard אם אנחנו נמצאים בו
+                if (currentSection === 'dashboard') {
+                    loadDashboard();
+                }
+            }
+        } catch (error) {
+            console.error('שגיאה בעדכון השקעה:', error);
+            showNotification('שגיאה בעדכון השקעה', 'error');
         }
     });
 
